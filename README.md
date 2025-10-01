@@ -1,1 +1,263 @@
-# CS136L3FC
+#include <iostream>
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <cstdlib>
+#include <ctime>
+#include <algorithm> 
+
+using namespace std;
+
+
+const string INPUT_FILE = "requests.txt";
+const string ERROR_FILE = "invalid.txt";
+const string OUTPUT_FILE = "accounts.txt";
+const string LOG_FILE = "log.txt";
+const int STACK_CAPACITY = 100;
+const int BONUS_STUDENT = 150;
+const int BONUS_OTHER = 100;
+const int MIN_NAME_LENGTH = 2;
+const int MIN_EMAIL_USER = 4;
+const int MIN_EMAIL_SERVER = 4;
+
+
+class Logger {
+public:
+    static void log(const string& message) {
+        ofstream log(LOG_FILE, ios::app);
+        if (log.is_open()) {
+            log << message << endl;
+            log.close();
+        }
+    }
+    static void printLog() {
+        ifstream log(LOG_FILE);
+        string line;
+        while (getline(log, line)) {
+            cout << line << endl;
+        }
+        log.close();
+    }
+};
+
+
+class Validator {
+public:
+    static bool isValidSSN(const string& ssn) {
+        return ssn.length() == 10 && all_of(ssn.begin(), ssn.end(), ::isdigit);
+    }
+    static bool isValidName(const string& name) {
+        if (name.length() < MIN_NAME_LENGTH) return false;
+        for (char c : name) {
+            if (!isalpha(c)) return false;
+        }
+        return true;
+    }
+    static bool isValidEmail(const string& email) {
+        size_t at = email.find('@');
+        size_t dot = email.find('.', at);
+        if (at == string::npos || dot == string::npos) return false;
+        string user = email.substr(0, at);
+        string server = email.substr(at + 1, dot - at - 1);
+        string domain = email.substr(dot + 1);
+        if (user.length() < MIN_EMAIL_USER || server.length() < MIN_EMAIL_SERVER) return false;
+        if (domain != "com" && domain != "edu") return false;
+        for (char c : user) {
+            if (!isalnum(c) && c != '.' && c != '_') return false;
+        }
+        for (char c : server) {
+            if (!isalpha(c)) return false;
+        }
+        return true;
+    }
+};
+
+
+class CheckingAccount {
+private:
+    string ssn, firstName, lastName, email, accountNumber;
+    double availableBalance, presentBalance;
+public:
+    CheckingAccount()
+        : ssn("0000000000"), firstName(""), lastName(""), email(""),
+        accountNumber("00000000"), availableBalance(0.0), presentBalance(0.0) {
+    }
+
+    bool setAll(const string& s, const string& f, const string& l, const string& e, int suffix) {
+        if (!Validator::isValidSSN(s) || !Validator::isValidName(f) ||
+            !Validator::isValidName(l) || !Validator::isValidEmail(e))
+            return false;
+        ssn = s;
+        firstName = f;
+        lastName = l;
+        email = e;
+        accountNumber = generateAccountNumber(suffix);
+        availableBalance = 0.0;
+        presentBalance = (email.find(".edu") != string::npos) ? BONUS_STUDENT : BONUS_OTHER;
+        return true;
+    }
+
+    string generateAccountNumber(int suffix) {
+        srand(static_cast<unsigned int>(time(0)) + suffix);
+        string acc = "";
+        for (int i = 0; i < 6; ++i) {
+            acc += to_string(rand() % 10);
+        }
+        acc += (suffix < 10) ? "0" + to_string(suffix) : to_string(suffix);
+        return acc;
+    }
+
+    void print() const {
+        cout << left << setw(12) << ssn
+            << setw(12) << firstName
+            << setw(12) << lastName
+            << setw(25) << email
+            << setw(12) << accountNumber
+            << right << fixed << setprecision(2)
+            << setw(10) << availableBalance
+            << setw(10) << presentBalance << endl;
+    }
+
+    void writeToFile(ofstream& out) const {
+        out << left << setw(12) << ssn
+            << setw(12) << firstName
+            << setw(12) << lastName
+            << setw(25) << email
+            << setw(12) << accountNumber
+            << right << fixed << setprecision(2)
+            << setw(10) << availableBalance
+            << setw(10) << presentBalance << endl;
+    }
+};
+
+
+class AccountStack {
+private:
+    CheckingAccount stack[STACK_CAPACITY];
+    int top;
+public:
+    AccountStack() : top(-1) {}
+
+    bool push(const CheckingAccount& acc) {
+        if (top >= STACK_CAPACITY - 1) return false;
+        stack[++top] = acc;
+        return true;
+    }
+
+    bool pop(CheckingAccount& acc) {
+        if (top < 0) return false;
+        acc = stack[top--];
+        return true;
+    }
+
+    bool peek(CheckingAccount& acc) const {
+        if (top < 0) return false;
+        acc = stack[top];
+        return true;
+    }
+
+    bool isEmpty() const {
+        return top < 0;
+    }
+
+    void printAll() const {
+        for (int i = top; i >= 0; --i) {
+            stack[i].print();
+        }
+    }
+
+    int size() const {
+        return top + 1;
+    }
+};
+
+
+int main() {
+    AccountStack accountStack;
+    int processed = 0, created = 0, invalid = 0;
+    bool running = true;
+    string ssn, first, last, email;
+    int suffix = 1;
+
+    while (running) {
+        cout << "\nMenu:\n"
+            << "1. Process new checking account requests\n"
+            << "2. Print all valid accounts\n"
+            << "3. Print all invalid records\n"
+            << "4. Print log file\n"
+            << "5. Quit and write accounts to file\n"
+            << "Enter choice: ";
+        int choice;
+        cin >> choice;
+
+        switch (choice) {
+        case 1: {
+            ifstream in(INPUT_FILE);
+            ofstream err(ERROR_FILE);
+            if (!in.is_open()) {
+                cout << "Input file not found.\n";
+                break;
+            }
+            while (in >> ssn >> first >> last >> email) {
+                processed++;
+                CheckingAccount acc;
+                if (acc.setAll(ssn, first, last, email, suffix)) {
+                    accountStack.push(acc);
+                    suffix++;
+                    created++;
+                    Logger::log("Created account for " + first + " " + last);
+                }
+                else {
+                    err << ssn << " " << first << " " << last << " " << email << endl;
+                    invalid++;
+                    Logger::log("Invalid record: " + ssn + " " + first + " " + last + " " + email);
+                }
+            }
+            in.close();
+            err.close();
+            cout << "Processed: " << processed << ", Created: " << created << ", Invalid: " << invalid << endl;
+            break;
+        }
+        case 2:
+            accountStack.printAll();
+            break;
+        case 3: {
+            ifstream err(ERROR_FILE);
+            string line;
+            while (getline(err, line)) {
+                cout << line << endl;
+            }
+            err.close();
+            break;
+        }
+        case 4:
+            Logger::printLog();
+            break;
+        case 5: {
+            ofstream out(OUTPUT_FILE);
+            CheckingAccount acc;
+            while (accountStack.pop(acc)) {
+                acc.writeToFile(out);
+            }
+            out.close();
+            running = false;
+            break;
+        }
+        default:
+            cout << "Invalid choice.\n";
+        }
+    }
+
+    /* Test Runs
+        Sample input file: requests.txt
+        1234567890 John Doe john_doe@lapc.edu
+        9876543210 Jane Smith jane.smith@gmail.com
+        1111111111 A B ab@bad.com
+    Expected Output:
+        Processed: 3, Created: 2, Invalid: 1
+        Valid accounts printed in table format
+        Invalid record: 1111111111 A B ab@bad.com
+        Log file contains transaction history
+    */
+    return 0;
+}
